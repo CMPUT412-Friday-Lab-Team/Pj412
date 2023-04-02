@@ -2,10 +2,13 @@ import math
 import threading
 import rospy
 
+
 TICK_TO_METER = 0.00165
+
 
 def to_sec(time):
     return time.nsecs * 1e-9 + time.secs
+
 
 class WheelPositionIntegration:
     def __init__(self, radius_millimeter, init_x=0., init_y=0., init_theta=0.):

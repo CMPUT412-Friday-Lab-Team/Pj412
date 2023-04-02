@@ -12,7 +12,6 @@ from duckietown_msgs.msg import WheelsCmdStamped, Twist2DStamped
 import os
 import threading
 import math
-import exploration_history
 import deadreckoning
 
 HOST_NAME = os.environ["VEHICLE_NAME"]
@@ -51,7 +50,6 @@ class LaneFollowNode(DTROS):
         self.last_seen_apriltag = 169
         self.lock = threading.Lock()  # used to coordinate the subscriber thread and the main thread
         self.controller = deadreckoning.DeadReckoning()  # will handle wheel commands during turning
-        self.exploration_history = exploration_history.ExplorationHistory() 
 
         # Publishers & Subscribers
         if DEBUG:
@@ -171,15 +169,8 @@ class LaneFollowNode(DTROS):
             else:
                 rospy.loginfo('unrecognized tag id!')
 
-            turn_idx = -1
-            lowest_count = math.inf
-            for cur_turn_idx in possible_turns:
-                count = self.exploration_history.getCount(tagid, cur_turn_idx)
-                if count < lowest_count:
-                    lowest_count = count
-                    turn_idx = cur_turn_idx
+            turn_idx = possible_turns[0]
 
-            self.exploration_history.incCount(tagid, turn_idx)
             rospy.loginfo(f'turn idx:{turn_idx}, apriltag seen: {last_seen_apriltag} updated apriltag: {id_after[turn_idx]}')
             last_seen_apriltag = id_after[turn_idx]
             self.last_seen_apriltag = last_seen_apriltag

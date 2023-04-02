@@ -15,7 +15,6 @@ dt-launchfile-init
 # launching app
 dt-exec roslaunch ml_node ml_node.launch veh:="$VEHICLE_NAME"
 dt-exec roslaunch lane_following lane_following.launch veh:="$VEHICLE_NAME"
-dt-exec roslaunch sensor_fusion sensor_fusion.launch veh:="$VEHICLE_NAME"
 
 # ----------------------------------------------------------------------------
 # YOUR CODE ABOVE THIS LINE
