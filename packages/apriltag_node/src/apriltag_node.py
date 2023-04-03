@@ -10,12 +10,9 @@ from sensor_msgs.msg import CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
 from dt_apriltags import Detector
 import rospkg
-import math
 
 from std_msgs.msg import Int32, String
 from duckietown.dtros import DTROS, TopicType, NodeType
-import digit_crop
-import detect_history
 from duckietown_msgs.msg import AprilTagDetectionArray, AprilTagDetection
 from geometry_msgs.msg import Transform, Vector3, Quaternion
 import tf
@@ -33,27 +30,11 @@ def _matrix_to_quaternion(r):
     return tf.transformations.quaternion_from_matrix(T)
 
 
-def send_compressed(pub, seq, frame_id, im):
-    msg = CompressedImage()
-    msg.header.seq = seq
-    msg.header.stamp = rospy.Time.now()
-    msg.header.frame_id = frame_id
-    msg.format = 'jpeg'
-    ret, buffer = cv2.imencode('.jpg', im)
-    if not ret:
-        print('failed to encode image!')
-    else:
-        msg.data = np.array(buffer).tostring()
-        pub.publish(msg)
-    return ret
-
-
 class MLNode(DTROS):
 
     def __init__(self, node_name):
         super(MLNode, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
         rospack = rospkg.RosPack()
-        self._tf_bcaster = tf.TransformBroadcaster()
         self.seq = 0
         self.intrinsic = self.readYamlFile(rospack.get_path('apriltag_node') + '/src/camera_intrinsic.yaml')
         self.detector = Detector(searchpath=['apriltags'],
@@ -64,45 +45,23 @@ class MLNode(DTROS):
                        refine_edges=1,
                        decode_sharpening=0.25,
                        debug=0)
-        self.detect_history = detect_history.DetectHistory()
         self.timer = 0
 
-        self.continue_run = True
         self.camera_sub = rospy.Subscriber(f'/{HOST_NAME}/camera_node/image/compressed', CompressedImage, self.callback)
         self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
-        self.digit_sub = rospy.Subscriber(f'/{HOST_NAME}/april_tag_node/detected_digit', String, self.digit_callback)
 
-        self.general_pub = rospy.Publisher(f'/general', String, queue_size=10)
         self.tag_pub = rospy.Publisher(f'/{HOST_NAME}/detected_tagid', Int32, queue_size=10)
-        self.digit_pub = rospy.Publisher(f'/{HOST_NAME}/cropped_digit/compressed', CompressedImage, queue_size=10)
-        self.rviz_pub = rospy.Publisher(f'/{HOST_NAME}/detection_visualization/compressed', CompressedImage, queue_size=10)
         self.detections_pub = rospy.Publisher(f'/{HOST_NAME}/apriltag_detector_node/detections', AprilTagDetectionArray,
-                                    queue_size=2)
-    
-    def digit_callback(self, msg):
-        strs = msg.data.split()
-        seq = int(strs[0]) - 1
-        digit = int(strs[1])
-        tagid = self.detect_history.add_recognition(seq, digit)
-        if self.detect_history.is_all_digit_recognized():
-            rospy.loginfo(f'all tags detected, shutting down the container...')
-            self.general_pub.publish(String('shutdown'))
-        # rospy.loginfo(f'digit recognized:{digit} on tag {tagid} with im seq={seq}')
+                                              queue_size=2)
 
     def general_callback(self, msg):
         if msg.data == 'shutdown':
             rospy.signal_shutdown('received shutdown message')
-        elif msg.data == 'stop':
-            self.continue_run = False
 
-    def crop_and_send_digit(self, undistort_im, detected_tags, roi):
-        if DEBUG:
-            dst = np.copy(undistort_im)
-
+    def process_tags(self, detected_tags):
         for det in detected_tags:
-            ymin = int(np.min(det.corners[:, 1]).item())
-            x, y = det.center
-            x, y = int(x), int(y)
+            # ymin = int(np.min(det.corners[:, 1]).item())
+            # x, y = det.center
 
             # ignore tags that are too close
             ihom_pose = det.pose_t
@@ -113,34 +72,6 @@ class MLNode(DTROS):
             # broadcast tag id
             id = det.tag_id
             self.tag_pub.publish(Int32(id))
-            predy = ymin * 2 - y
-            rect, digit_im = digit_crop.get_cropped_digit(undistort_im, (x, predy))
-
-            if digit_im is None:
-                continue  # no digit detected
-            else:
-                # published the cropped digit image
-                self.detect_history.add_detection(self.seq, id, 1)
-                ret = send_compressed(self.digit_pub, self.seq, f'{HOST_NAME}/camera_optical_frame', digit_im)
-                if ret:
-                    self.seq += 1
-                
-                if DEBUG:
-                    # draw the bound box and most likely digit for each tag
-                    bound_x, bound_y, bound_w, bound_h = rect
-                    corners = np.array(((
-                        (bound_x, bound_y), 
-                        (bound_x + bound_w, bound_y),
-                        (bound_x + bound_w, bound_y + bound_h),
-                        (bound_x, bound_y + bound_h)), ), dtype=np.int32)
-                    cv2.polylines(dst, corners, True, (255, 0, 0))
-                    dst = cv2.putText(dst, str(self.detect_history.get_most_likely_digit(id)), 
-                                      (x, predy), cv2.FONT_HERSHEY_SIMPLEX,1, (0, 255, 0), 1, cv2.LINE_AA)
-
-        if DEBUG:
-            x,y,w,h = roi
-            dst = dst[y:y+h, x:x+w]
-            send_compressed(self.rviz_pub, self.seq, f'{HOST_NAME}/camera_optical_frame', dst)
     
     def callback(self, msg):
         # how to decode compressed image
@@ -195,7 +126,7 @@ class MLNode(DTROS):
             # publish detections
             self.detections_pub.publish(tags_msg)
 
-            self.crop_and_send_digit(undistort_im, detected_tags, roi)
+            self.process_tags(detected_tags)
 
     def readYamlFile(self,fname):
         """
