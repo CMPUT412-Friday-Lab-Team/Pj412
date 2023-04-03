@@ -11,8 +11,6 @@ from duckietown.dtros import DTROS, NodeType
 from duckietown_msgs.msg import WheelEncoderStamped, WheelsCmdStamped, Twist2DStamped
 from tf2_ros import TransformBroadcaster
 
-from tf import transformations as tr
-from lane_following.srv import updatepos
 import math
 import os
 
@@ -98,9 +96,6 @@ class DeadReckoning:
 
         self.speed = 0.67
         self.rate = rospy.Rate(60)
-        
-        # Setup update position service
-        self.s = rospy.Service('update_pos', updatepos, self.update_service)
 
         rospy.loginfo("Initialized")
         
@@ -109,49 +104,11 @@ class DeadReckoning:
         self.turn_flag = turn_flag
         self.lock.release()
 
-    def update_service(self, req):
-        self.lock.acquire()
-        if not self.turn_flag:
-            # print("updatepos received request:", req.x, req.y, req.z)
-            self.base_x = req.x
-            self.base_y = req.y
-            self.base_z = req.z
-            self.base_yaw = req.yaw
-            self.wheel_integration.reset_position()
-        self.lock.release()
-        return True
-
     def left_callback(self, msg):
         self.wheel_integration.update_left(msg.data, rospy.get_rostime())
 
     def right_callback(self, msg):
         self.wheel_integration.update_right(msg.data, rospy.get_rostime())
-
-    def publish_odometry(self):
-        odom = Odometry()
-        odom.header.stamp = rospy.Time.now()  # Ideally, should be encoder time
-        odom.header.frame_id = self.origin_frame
-        byaw = self.base_yaw
-        pose_x, pose_y, yaw = self.wheel_integration.get_state_meters()
-        pose_x, pose_y = \
-            self.base_x + pose_x * math.cos(byaw) + pose_y * math.sin(byaw), \
-            self.base_y + pose_y * math.cos(byaw) - pose_y * math.sin(byaw)
-        q = tr.quaternion_from_euler(0, 0, self.angle_clamp(yaw + self.base_yaw))
-        odom.pose.pose = Pose(Point(pose_x, pose_y, self.base_z), Quaternion(*q))
-        odom.child_frame_id = self.target_frame
-        odom.twist.twist = Twist(Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0))
-
-        self.pub.publish(odom)
-
-        self._tf_broadcaster.sendTransform(
-            TransformStamped(
-                header=odom.header,
-                child_frame_id=self.target_frame,
-                transform=Transform(
-                    translation=Vector3(pose_x, pose_y, self.base_z), rotation=Quaternion(*q)
-                ),
-            )
-        )
 
     def reset_position(self):
         # print('resetting position')
@@ -178,7 +135,6 @@ class DeadReckoning:
         msg.vel_left = left_speed
         msg.vel_right = right_speed
         self.wheel_pub.publish(msg)
-        self.publish_odometry()
 
     def stop(self, stop_time=16):
         """
