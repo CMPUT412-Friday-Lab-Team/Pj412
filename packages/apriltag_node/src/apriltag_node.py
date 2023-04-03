@@ -55,7 +55,7 @@ class MLNode(DTROS):
         rospack = rospkg.RosPack()
         self._tf_bcaster = tf.TransformBroadcaster()
         self.seq = 0
-        self.intrinsic = self.readYamlFile(rospack.get_path('ml_node') + '/src/camera_intrinsic.yaml')
+        self.intrinsic = self.readYamlFile(rospack.get_path('apriltag_node') + '/src/camera_intrinsic.yaml')
         self.detector = Detector(searchpath=['apriltags'],
                        families='tag36h11',
                        nthreads=1,
@@ -125,21 +125,6 @@ class MLNode(DTROS):
                 if ret:
                     self.seq += 1
                 
-                # draw borders and center for each tag if in debugging mode
-                # if DEBUG:
-                #     hom_pose = np.zeros((4, 1), dtype=np.float32)
-                #     hom_pose[0:3, :] = ihom_pose
-                #     hom_proj_pose_t = camera_proj_mat @ hom_pose
-                #     ihom_proj_pose_t = hom_proj_pose_t[0:2, :] / hom_proj_pose_t[2, 0]
-                #     proj_x, proj_y = int(ihom_proj_pose_t[0, 0].item()), int(ihom_proj_pose_t[1, 0].item())
-
-                    # cv2.drawMarker(dst, (proj_x, proj_y), (0, 0, 255))
-                    # dst = cv2.putText(dst, str(id), (proj_x, proj_y), cv2.FONT_HERSHEY_SIMPLEX,1, (255, 0, 0), 1, cv2.LINE_AA)
-                    # cv2.polylines(dst, np.array([det.corners], dtype=np.int32), True, (255, 0, 0))
-                    # ihom_center = np.sum(np.array(det.corners, dtype=np.float32), axis=0) / 4
-                    # centerx, centery = int(ihom_center[0].item()), int(ihom_center[1].item())
-                    # cv2.drawMarker(dst, (centerx, centery), (0, 255, 0))
-                
                 if DEBUG:
                     # draw the bound box and most likely digit for each tag
                     bound_x, bound_y, bound_w, bound_h = rect
@@ -207,14 +192,6 @@ class MLNode(DTROS):
                 )
                 # add detection to array
                 tags_msg.detections.append(detection)
-                # publish tf
-                self._tf_bcaster.sendTransform(
-                    p.tolist(),
-                    q.tolist(),
-                    msg.header.stamp,
-                    "tag/{:s}".format(str(tag.tag_id)),
-                    msg.header.frame_id,
-                )
             # publish detections
             self.detections_pub.publish(tags_msg)
 
@@ -242,8 +219,7 @@ class MLNode(DTROS):
 
 
 if __name__ == '__main__':
-    ml_node = MLNode('ml_node')
+    apriltag_node = MLNode('apriltag_node')
     rospy.spin()
-    #ml_node.run()
 
 

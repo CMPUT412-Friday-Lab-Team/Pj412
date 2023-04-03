@@ -1,5 +1,5 @@
 <package>
-  <name>ml_node</name>
+  <name>apriltag_node</name>
   <version>0.1.0</version>
   <description>
   This package is used to do stuffs for the exercise CRA1 .

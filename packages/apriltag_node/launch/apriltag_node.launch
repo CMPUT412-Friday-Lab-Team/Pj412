@@ -2,7 +2,7 @@
   <arg name="veh"/>
   <arg name="map_file" default="hub"/>
   <group ns="$(arg veh)">
-    <node pkg="ml_node" type="ml_node.py" name="ml_node" output="screen">
+    <node pkg="apriltag_node" type="apriltag_node.py" name="apriltag_node" output="screen">
     </node>
   </group>
 
