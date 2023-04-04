@@ -9,13 +9,6 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   cv_bridge
   duckietown_msgs
-  message_generation
-)
-
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-  nav_msgs
 )
 
 add_dependencies(${catkin_EXPORTED_TARGETS})
