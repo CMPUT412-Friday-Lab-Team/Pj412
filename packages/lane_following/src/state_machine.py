@@ -25,7 +25,7 @@ class BotState:
             # part2 (ends when the robot sees the parking lot entry)
             30: [163],  # before first crosswalk
             31: [163],  # before second crosswalk
-            32: [56],  # before seeing the entry apriltag to the parking lot
+            32: [38],  # before seeing the entry apriltag to the parking lot
 
             # part3 (have a separate variable to indicate which stall is the goal)
             40: [227],  # before seeing the tag inside the parking lot
