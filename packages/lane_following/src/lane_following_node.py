@@ -13,6 +13,7 @@ import os
 import threading
 import math
 import deadreckoning
+import state_machine
 
 HOST_NAME = os.environ["VEHICLE_NAME"]
 ROAD_MASK = [(20, 60, 0), (50, 255, 255)]
@@ -45,26 +46,23 @@ class LaneFollowNode(DTROS):
         self.last_time = rospy.get_time()
 
         # handling stopping at stopline
-        self.turn_flag = False  # initiate the turning when this is set to true
+        self.prep_turn = False  # initiate the turning when this is set to true
         self.stop_timer_reset = 0  # 0 is can stop any time, non-zero means wait a period of time and then we look for stop lines
-        self.last_seen_apriltag = 169
         self.lock = threading.Lock()  # used to coordinate the subscriber thread and the main thread
         self.controller = deadreckoning.DeadReckoning()  # will handle wheel commands during turning
 
         # Publishers & Subscribers
+        GOAL_STALL = 1  # TODO: specify this in the command line
+        self.bot_state = state_machine.BotState(GOAL_STALL)
         if DEBUG:
-            self.pub = rospy.Publisher("/" + self.veh + "/output/image/mask/compressed",
+            self.pub = rospy.Publisher("/{self.veh}/output/image/mask/compressed",
                                    CompressedImage,
                                    queue_size=1)
         self.sub = rospy.Subscriber(f"/{self.veh}/camera_node/image/compressed", CompressedImage,
                                     self.callback, queue_size=1, buff_size="20MB")
         self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
 
-        self.tag_sub = rospy.Subscriber(f'/{HOST_NAME}/detected_tagid', 
-                                    Int32, 
-                                    self.tag_callback,
-                                    queue_size=1)
-        self.vel_pub = rospy.Publisher("/" + self.veh + "/car_cmd_switch_node/cmd",
+        self.vel_pub = rospy.Publisher(f"/{self.veh}/car_cmd_switch_node/cmd",
                                        Twist2DStamped,
                                        queue_size=1)
 
@@ -76,17 +74,9 @@ class LaneFollowNode(DTROS):
 
     def is_turning(self):
         self.lock.acquire()
-        is_turning = self.turn_flag
+        is_turning = self.prep_turn
         self.lock.release()
         return is_turning
-
-    def tag_callback(self, msg):
-        id = msg.data
-        if id in (58, 62, 169, 133, 153, 162):
-            # rospy.loginfo(f'tag seen:{id}')
-            self.lock.acquire()
-            self.last_seen_apriltag = id
-            self.lock.release()
 
     def callback(self, msg):
         # update stop timer/timer reset and skip the callback if the vehicle is stopped
@@ -94,7 +84,7 @@ class LaneFollowNode(DTROS):
         stop_timer_reset = self.stop_timer_reset
         self.stop_timer_reset = max(0, stop_timer_reset - 1)
         self.lock.release()
-        if self.is_turning():
+        if self.bot_state.get_lane_following_flag():
             self.proportional = None
             return
 
@@ -140,41 +130,12 @@ class LaneFollowNode(DTROS):
             self.pub.publish(rect_img_msg)
 
     def drive(self):
-        if self.is_turning():  # TURNING
+        if self.is_turning():
             self.controller.stop(20)
             self.controller.reset_position()
 
-            self.lock.acquire()
-            last_seen_apriltag = self.last_seen_apriltag
-            # make a turn
-            tagid = last_seen_apriltag
-            if tagid == 58:
-                possible_turns = [1, 2]
-                id_after = [None, 133, 162]
-            elif tagid == 133:
-                possible_turns = [1, 2]
-                id_after = [None, 58, 169]
-            elif tagid == 162:
-                possible_turns = [2, 0]
-                id_after = [62, None, 58]
-            elif tagid == 169:
-                possible_turns = [2, 0]
-                id_after = [153, None, 133]
-            elif tagid == 62:
-                possible_turns = [0, 1]
-                id_after = [162, 153, None]
-            elif tagid == 153: # id is 153
-                possible_turns = [0, 1]
-                id_after = [169, 62, None]
-            else:
-                rospy.loginfo('unrecognized tag id!')
-
-            turn_idx = possible_turns[0]
-
-            rospy.loginfo(f'turn idx:{turn_idx}, apriltag seen: {last_seen_apriltag} updated apriltag: {id_after[turn_idx]}')
-            last_seen_apriltag = id_after[turn_idx]
-            self.last_seen_apriltag = last_seen_apriltag
-            self.lock.release()
+            turn_idx = self.bot_state.decide_turn_at_red_stopline()
+            self.bot_state.advance_state()
 
             self.controller.set_turn_flag(True)
             self.controller.driveForTime(.6, .6, 6)
@@ -186,9 +147,8 @@ class LaneFollowNode(DTROS):
                 self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
             self.controller.set_turn_flag(False)
 
-            # reset the detection list since we are out of the intersection after the turn
             self.lock.acquire()
-            self.turn_flag = False
+            self.prep_turn = False
             self.lock.release()
         else:  # PID CONTROLLED LANE FOLLOWING
             if self.proportional is None:
@@ -241,7 +201,7 @@ class LaneFollowNode(DTROS):
         if contour_y > 390:
             self.lock.acquire()
             self.stop_timer_reset = STOP_TIMER_RESET_TIME
-            self.turn_flag = True
+            self.prep_turn = True
             self.lock.release()
 
     def hook(self):
