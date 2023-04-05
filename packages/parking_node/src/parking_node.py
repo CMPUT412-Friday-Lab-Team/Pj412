@@ -31,7 +31,7 @@ class Parking(DTROS):
 
         #Publishers
         self.pub = rospy.Publisher(f"/{HOST_NAME}/car_cmd_switch_node/cmd", Twist2DStamped,queue_size=1)
-
+        self.genreal_shutdown = rospy.Publihseer('/general', String, queue_size = 1)
         #Encoder variables
         self.left_tick = None
         self.right_tick = None
@@ -100,6 +100,7 @@ class Parking(DTROS):
         while self.angle < angle:
             self.pub.publish(msg)
             self.angle += (self.delta_right + self.delta_left)/(2*self._robot_width)
+            rospy.sleep(0.1)
 
 
     def move(self,distance,v1=0.4,v2=0.4):
@@ -133,12 +134,20 @@ class Parking(DTROS):
             else:
                 self.turn("right",math.pi/4)
 
+    def shutdown(self):
+        self.genreal_shutdown.publish("shutdown")
+        rospy.signal_shutdown("Shutting Down ...")
+
     def main(self):
+        self.take_position()
+
+        """
+        Main idea is:
+                taking position -> calculate distance using translation matrix -> Do 180 turn -> Use Rotation Matrix to Allign -> Go Backwards
+        
+        
+        """
         pass
-
-    def onShutdown(self):
-        super(MLNode, self).onShutdown()
-
 
 if __name__ == '__main__':
     parking_node = Parking('parking_node')
