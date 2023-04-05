@@ -84,12 +84,12 @@ class LaneFollowNode(DTROS):
         stop_timer_reset = self.stop_timer_reset
         self.stop_timer_reset = max(0, stop_timer_reset - 1)
         self.lock.release()
-        if self.bot_state.get_lane_following_flag():
+        if not self.bot_state.get_lane_following_flag():
             self.proportional = None
             return
 
         img = self.jpeg.decode(msg.data)
-        if stop_timer_reset == 0:
+        if stop_timer_reset == 0 and self.bot_state.get_flags()['is_expecting_red_stopline']:
             # look for stop line
             self.stopline_processing(img)
 
@@ -135,14 +135,15 @@ class LaneFollowNode(DTROS):
             self.controller.reset_position()
 
             turn_idx = self.bot_state.decide_turn_at_red_stopline()
-            self.bot_state.advance_state()
+            new_stateid = self.bot_state.advance_state()
+            print(f'turn_idx:{turn_idx}, new_stateid:{new_stateid}')
 
             self.controller.set_turn_flag(True)
             self.controller.driveForTime(.6, .6, 6)
             if turn_idx == 0:
                 self.controller.driveForTime(.58 * self.speed, 1.42 * self.speed, 40)
             elif turn_idx == 1:
-                self.controller.driveForTime(1.1 * self.speed, .9 * self.speed, 60)
+                self.controller.driveForTime(.9 * self.speed, 1.1 * self.speed, 75)
             elif turn_idx == 2:
                 self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
             self.controller.set_turn_flag(False)

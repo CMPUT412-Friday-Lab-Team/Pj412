@@ -13,12 +13,8 @@ P1_START = 0
 P1_FIRST_TAG = 0
 P1_STRAIGHT_0 = 10
 P1_STRAIGHT_1 = 11
-P1_STRAIGHT_2 = 12
-P1_STRAIGHT_3 = 13
 P1_RIGHT_0 = 20
 P1_RIGHT_1 = 21
-P1_RIGHT_2 = 22
-P1_RIGHT_3 = 23
 P1_END = 29
 
 P2_START = 30
@@ -51,14 +47,10 @@ class BotState:
             P1_FIRST_TAG: [48, 56],  # before first apriltag
             # go straight
             P1_STRAIGHT_0: [48],
-            P1_STRAIGHT_1: [48],
-            P1_STRAIGHT_2: [48],
-            P1_STRAIGHT_3: [50],
+            P1_STRAIGHT_1: [50],
             # turn right
             P1_RIGHT_0: [50],
-            P1_RIGHT_1: [50],
-            P1_RIGHT_2: [50],
-            P1_RIGHT_3: [56],
+            P1_RIGHT_1: [56],
 
             # part2 (ends when the robot sees the parking lot entry)
             P2_CROSSWALK_0: [163],  # before first crosswalk
@@ -83,14 +75,10 @@ class BotState:
             P1_FIRST_TAG: {56: P1_STRAIGHT_0, 48: P1_RIGHT_0},
             # go straight
             P1_STRAIGHT_0: P1_STRAIGHT_1,
-            P1_STRAIGHT_1: P1_STRAIGHT_2,
-            P1_STRAIGHT_2: P1_STRAIGHT_3,
-            P1_STRAIGHT_3: P2_CROSSWALK_0,
+            P1_STRAIGHT_1: P2_CROSSWALK_0,
             # turn right
             P1_RIGHT_0: P1_RIGHT_1,
-            P1_RIGHT_1: P1_RIGHT_2,
-            P1_RIGHT_2: P1_RIGHT_3,
-            P1_RIGHT_3: P2_CROSSWALK_0,
+            P1_RIGHT_1: P2_CROSSWALK_0,
 
             # part2
             P2_CROSSWALK_0: P2_CROSSWALK_1,
@@ -104,10 +92,11 @@ class BotState:
             P3_BACKING: TASK_END,
         }
 
-        self.goal_stall = goal_stall
-        self.stateid = 0
         self.lock = threading.Lock()
+        self.goal_stall = goal_stall
+        self.stateid = None
         self.last_seen_apriltag = None
+        self.update_state(P1_FIRST_TAG)
 
         # handy flags to turn on/off some robot behaviors
         self.lane_follow = True  # if true, do lane following
@@ -136,6 +125,17 @@ class BotState:
     def get_expected_tags(self):
         return self.stateid_expected_tags[self.stateid]
     
+    def get_flags(self):
+        self.lock.acquire()
+        flags = {
+            'lane_follow': self.lane_follow,
+            'crosswalk_waiting': self.crosswalk_waiting,
+            'is_expecting_red_stopline': self.is_expecting_red_stopline,
+            'is_expecting_crosswalk': self.is_expecting_crosswalk,
+        }
+        self.lock.release()
+        return flags
+
     def get_lane_following_flag(self):
         self.lock.acquire()
         flag = self.lane_follow
@@ -190,7 +190,9 @@ class BotState:
         self.lock.acquire()
         next_state_info = self.new_state_after_turn_at_state[self.stateid]
         if type(next_state_info) is dict:
-            self.update_state(next_state_info[self.last_seen_apriltag])
+            new_stateid = next_state_info[self.last_seen_apriltag]
         else:
-            self.update_state(next_state_info)
+            new_stateid = next_state_info
+        self.update_state(new_stateid)
         self.lock.release()
+        return new_stateid

@@ -19,8 +19,8 @@ import tf
 
 
 HOST_NAME = os.environ["VEHICLE_NAME"]
-IGNORE_DISTANCE_MAX = .6
-IGNORE_DISTANCE_MIN = .34
+IGNORE_DISTANCE_MAX = .85
+IGNORE_DISTANCE_MIN = .0
 DEBUG = True
 
 
@@ -71,6 +71,7 @@ class MLNode(DTROS):
 
             # broadcast tag id
             id = det.tag_id
+            print(f'detected id: {id}')
             self.tag_pub.publish(Int32(id))
     
     def callback(self, msg):
