@@ -51,6 +51,9 @@ class LaneFollowNode(DTROS):
         self.lock = threading.Lock()  # used to coordinate the subscriber thread and the main thread
         self.controller = deadreckoning.DeadReckoning()  # will handle wheel commands during turning
 
+        # handling stopping at crosswalk
+        self.crosswalk_tag_detected = False
+
         # Publishers & Subscribers
         GOAL_STALL = 1  # TODO: specify this in the command line
         self.bot_state = state_machine.BotState(GOAL_STALL)
@@ -60,17 +63,31 @@ class LaneFollowNode(DTROS):
                                    queue_size=1)
         self.sub = rospy.Subscriber(f"/{self.veh}/camera_node/image/compressed", CompressedImage,
                                     self.callback, queue_size=1, buff_size="20MB")
+        self.tag_distance_sub = rospy.Subscriber(f'/{HOST_NAME}/detected_tag_distance', String, self.tag_distance_callback)
         self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
+        self.general_pub = rospy.Publisher('/general', String, queue_size=1)
 
         self.vel_pub = rospy.Publisher(f"/{self.veh}/car_cmd_switch_node/cmd",
                                        Twist2DStamped,
                                        queue_size=1)
 
+    def tag_distance_callback(self, msg):
+        words = msg.data.split()
+        tagid = int(words[0])
+        distance = float(words[1])
+        if tagid == 163 and distance < .4:
+            self.lock.acquire()
+            self.crosswalk_tag_detected = True
+            self.lock.release()
+
     def general_callback(self, msg):
         if msg.data == 'shutdown':
             rospy.signal_shutdown('received shutdown message')
-        elif msg.data == 'stop':
-            self.continue_run = False
+
+    def reset_pid(self):
+        self.proportional = None
+        self.last_error = 0
+        self.last_time = rospy.get_time()
 
     def is_turning(self):
         self.lock.acquire()
@@ -89,9 +106,20 @@ class LaneFollowNode(DTROS):
             return
 
         img = self.jpeg.decode(msg.data)
-        if stop_timer_reset == 0 and self.bot_state.get_flags()['is_expecting_red_stopline']:
-            # look for stop line
-            self.stopline_processing(img)
+        flags = self.bot_state.get_flags()
+
+        if flags['is_expecting_red_stopline']:
+            if stop_timer_reset == 0:
+                self.stopline_processing(img)
+        elif flags['is_expecting_crosswalk']:
+            # recognize crosswalk by the apriltag detection
+            self.lock.acquire()
+            crosswalk_tag_detected = self.crosswalk_tag_detected
+            self.crosswalk_tag_detected = False
+            self.lock.release()
+            if crosswalk_tag_detected and stop_timer_reset == 0:
+                self.on_stopline()
+
 
         crop = img[300:-1, :, :]
         crop_width = crop.shape[1]
@@ -131,22 +159,32 @@ class LaneFollowNode(DTROS):
 
     def drive(self):
         if self.is_turning():
-            self.controller.stop(20)
-            self.controller.reset_position()
+            if self.bot_state.get_flags()['is_expecting_red_stopline']:
+                self.controller.stop(20)
+                self.controller.reset_position()
 
-            turn_idx = self.bot_state.decide_turn_at_red_stopline()
-            new_stateid = self.bot_state.advance_state()
-            print(f'turn_idx:{turn_idx}, new_stateid:{new_stateid}')
+                turn_idx = self.bot_state.decide_turn_at_red_stopline()
+                new_stateid = self.bot_state.advance_state()
+                print(f'turn_idx:{turn_idx}, new_stateid:{new_stateid}')
 
-            self.controller.set_turn_flag(True)
-            self.controller.driveForTime(.6, .6, 6)
-            if turn_idx == 0:
-                self.controller.driveForTime(.58 * self.speed, 1.42 * self.speed, 40)
-            elif turn_idx == 1:
-                self.controller.driveForTime(.9 * self.speed, 1.1 * self.speed, 75)
-            elif turn_idx == 2:
-                self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
-            self.controller.set_turn_flag(False)
+                self.controller.set_turn_flag(True)
+                self.controller.driveForTime(.6, .6, 6)
+                if turn_idx == 0:
+                    self.controller.driveForTime(.58 * self.speed, 1.42 * self.speed, 40)
+                elif turn_idx == 1:
+                    self.controller.driveForTime(.9 * self.speed, 1.1 * self.speed, 78)
+                elif turn_idx == 2:
+                    self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
+                self.controller.set_turn_flag(False)
+                self.reset_pid()
+
+                if new_stateid == state_machine.P3_ENTER:
+                    # placeholder
+                    self.general_pub.publish(String('shutdown'))  # TODO: start part 3 parking node
+            else:
+                self.controller.stop(20)
+                new_stateid = self.bot_state.advance_state()
+                pass  # TODO: wait for ducks to cross if any
 
             self.lock.acquire()
             self.prep_turn = False
@@ -170,6 +208,12 @@ class LaneFollowNode(DTROS):
                     self.loginfo(self.proportional, P, D, self.twist.omega, self.twist.v)
 
             self.vel_pub.publish(self.twist)
+
+    def on_stopline(self):
+        self.lock.acquire()
+        self.stop_timer_reset = STOP_TIMER_RESET_TIME
+        self.prep_turn = True
+        self.lock.release()
 
     def stopline_processing(self, im):
         hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
@@ -200,10 +244,7 @@ class LaneFollowNode(DTROS):
             contour_y = ymin + height * 0.5
 
         if contour_y > 390:
-            self.lock.acquire()
-            self.stop_timer_reset = STOP_TIMER_RESET_TIME
-            self.prep_turn = True
-            self.lock.release()
+            self.on_stopline()
 
     def hook(self):
         print("SHUTTING DOWN")

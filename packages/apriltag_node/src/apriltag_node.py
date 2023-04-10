@@ -51,6 +51,7 @@ class MLNode(DTROS):
         self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
 
         self.tag_pub = rospy.Publisher(f'/{HOST_NAME}/detected_tagid', Int32, queue_size=10)
+        self.tag_distance_pub = rospy.Publisher(f'/{HOST_NAME}/detected_tag_distance', String, queue_size=10)
         self.detections_pub = rospy.Publisher(f'/{HOST_NAME}/apriltag_detector_node/detections', AprilTagDetectionArray,
                                               queue_size=2)
 
@@ -64,13 +65,16 @@ class MLNode(DTROS):
             # x, y = det.center
 
             # ignore tags that are too close
+            id = det.tag_id
             ihom_pose = det.pose_t
             distance = np.linalg.norm(ihom_pose)
+            
+            distance_msg_str = f'{id} {distance}'
+            self.tag_distance_pub.publish(String(distance_msg_str))
             if IGNORE_DISTANCE_MAX < distance or IGNORE_DISTANCE_MIN > distance:
                 continue
 
             # broadcast tag id
-            id = det.tag_id
             print(f'detected id: {id}')
             self.tag_pub.publish(Int32(id))
     
