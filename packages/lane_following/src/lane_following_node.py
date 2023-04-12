@@ -21,6 +21,10 @@ DEBUG = False
 ENGLISH = False
 STOP_TIMER_RESET_TIME = 60
 
+STOP_BECAUSE_RED_STOPLINE = 1
+STOP_BECAUSE_BROKEN_DUCKIEBOT = 2
+STOP_BECAUSE_CROSSWALK = 3
+
 class LaneFollowNode(DTROS):
 
     def __init__(self, node_name):
@@ -52,11 +56,12 @@ class LaneFollowNode(DTROS):
         self.controller = deadreckoning.DeadReckoning()  # will handle wheel commands during turning
 
         # handling stopping at crosswalk
+        self.stop_cause = None
         self.crosswalk_tag_detected = False
+        self.broken_duckiebot_detected = False
 
         # Publishers & Subscribers
-        GOAL_STALL = 1  # TODO: specify this in the command line
-        self.bot_state = state_machine.BotState(GOAL_STALL)
+        self.bot_state = state_machine.BotState(1)  # pass in 1 as placeholder; in the end self.bot_state is not used in part 3
         if DEBUG:
             self.pub = rospy.Publisher("/{self.veh}/output/image/mask/compressed",
                                    CompressedImage,
@@ -83,6 +88,8 @@ class LaneFollowNode(DTROS):
     def general_callback(self, msg):
         if msg.data == 'shutdown':
             rospy.signal_shutdown('received shutdown message')
+        elif msg.data == 'part3_start':
+            rospy.signal_shutdown('lane following node shutting down because first two parts completed')
 
     def reset_pid(self):
         self.proportional = None
@@ -94,6 +101,19 @@ class LaneFollowNode(DTROS):
         is_turning = self.prep_turn
         self.lock.release()
         return is_turning
+    
+    def on_stopline(self, stop_cause):
+        self.lock.acquire()
+        self.stop_timer_reset = STOP_TIMER_RESET_TIME
+        self.prep_turn = True
+        self.stop_cause = stop_cause
+        self.lock.release()
+    
+    def after_stopline(self):
+        self.lock.acquire()
+        self.stop_cause = None
+        self.prep_turn = False
+        self.lock.release()
 
     def callback(self, msg):
         # update stop timer/timer reset and skip the callback if the vehicle is stopped
@@ -110,15 +130,24 @@ class LaneFollowNode(DTROS):
 
         if flags['is_expecting_red_stopline']:
             if stop_timer_reset == 0:
-                self.stopline_processing(img)
+                self.red_stopline_processing(img)
         elif flags['is_expecting_crosswalk']:
+            # two cases: crosswalk or broken duckiebot
+            # test for brokwn duckiebot first
+            self.lock.acquire()
+            broken_duckiebot_detected = self.broken_duckiebot_detected
+            self.broken_duckiebot_detected = False
+            self.lock.release()
+            if broken_duckiebot_detected and stop_timer_reset == 0:
+                self.on_stopline(STOP_BECAUSE_BROKEN_DUCKIEBOT)
+
             # recognize crosswalk by the apriltag detection
             self.lock.acquire()
             crosswalk_tag_detected = self.crosswalk_tag_detected
             self.crosswalk_tag_detected = False
             self.lock.release()
             if crosswalk_tag_detected and stop_timer_reset == 0:
-                self.on_stopline()
+                self.on_stopline(STOP_BECAUSE_CROSSWALK)
 
 
         crop = img[300:-1, :, :]
@@ -159,7 +188,7 @@ class LaneFollowNode(DTROS):
 
     def drive(self):
         if self.is_turning():
-            if self.bot_state.get_flags()['is_expecting_red_stopline']:
+            if self.stop_cause == STOP_BECAUSE_RED_STOPLINE:
                 self.controller.stop(20)
                 self.controller.reset_position()
 
@@ -180,15 +209,17 @@ class LaneFollowNode(DTROS):
 
                 if new_stateid == state_machine.P3_ENTER:
                     # placeholder
-                    self.general_pub.publish(String('shutdown'))  # TODO: start part 3 parking node
-            else:
+                    self.general_pub.publish(String('part3_start'))  # TODO: start part 3 parking node
+            elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
                 self.controller.stop(20)
                 new_stateid = self.bot_state.advance_state()
-                pass  # TODO: wait for ducks to cross if any
+                # TODO: wait for ducks to cross if any
+            elif self.stop_cause == STOP_BECAUSE_BROKEN_DUCKIEBOT:
+                self.controller.stop(20)
+                # TODO: set self.offset to -220 for a period of e.g. 2 seconds
 
-            self.lock.acquire()
-            self.prep_turn = False
-            self.lock.release()
+            self.after_stopline()
+
         else:  # PID CONTROLLED LANE FOLLOWING
             if self.proportional is None:
                 self.twist.omega = 0
@@ -209,13 +240,7 @@ class LaneFollowNode(DTROS):
 
             self.vel_pub.publish(self.twist)
 
-    def on_stopline(self):
-        self.lock.acquire()
-        self.stop_timer_reset = STOP_TIMER_RESET_TIME
-        self.prep_turn = True
-        self.lock.release()
-
-    def stopline_processing(self, im):
+    def red_stopline_processing(self, im):
         hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
         lower_range = np.array([0,70,120])
         upper_range = np.array([5,180,255])
@@ -244,7 +269,7 @@ class LaneFollowNode(DTROS):
             contour_y = ymin + height * 0.5
 
         if contour_y > 390:
-            self.on_stopline()
+            self.on_stopline(STOP_BECAUSE_RED_STOPLINE)
 
     def hook(self):
         print("SHUTTING DOWN")
