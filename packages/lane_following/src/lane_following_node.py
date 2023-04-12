@@ -193,12 +193,12 @@ class LaneFollowNode(DTROS):
                     # placeholder
                     self.general_pub.publish(String('shutdown'))  # TODO: start part 3 parking node
             else:
+                # wait for duckies
                 self.controller.stop(20)
                 timer = 20
                 while 0 in self.obj_class or timer>0:
                     timer -= 1
                 new_stateid = self.bot_state.advance_state()
-                pass  # TODO: wait for ducks to cross if any
 
             self.lock.acquire()
             self.prep_turn = False
