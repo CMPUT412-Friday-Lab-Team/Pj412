@@ -219,20 +219,20 @@ class LaneFollowNode(DTROS):
                 new_stateid = self.bot_state.advance_state()
                 print(f'turn_idx:{turn_idx}, new_stateid:{new_stateid}')
 
-                self.controller.set_turn_flag(True)
-                self.controller.driveForTime(.6, .6, 6)
-                if turn_idx == 0:
-                    self.controller.driveForTime(.58 * self.speed, 1.42 * self.speed, 40)
-                elif turn_idx == 1:
-                    self.controller.driveForTime(.9 * self.speed, 1.1 * self.speed, 78)
-                elif turn_idx == 2:
-                    self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
-                self.controller.set_turn_flag(False)
-                self.reset_pid()
-
                 if new_stateid == state_machine.P3_ENTER:
                     self.general_pub.publish(String('part3_start'))
-                
+                else:
+                    self.controller.set_turn_flag(True)
+                    self.controller.driveForTime(.6, .6, 6)
+                    if turn_idx == 0:
+                        self.controller.driveForTime(.58 * self.speed, 1.42 * self.speed, 40)
+                    elif turn_idx == 1:
+                        self.controller.driveForTime(.9 * self.speed, 1.1 * self.speed, 78)
+                    elif turn_idx == 2:
+                        self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
+                    self.controller.set_turn_flag(False)
+                    self.reset_pid()
+                    
             elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
                 # wait for duckies  
                 timer = 20
