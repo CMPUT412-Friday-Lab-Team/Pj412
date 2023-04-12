@@ -50,6 +50,8 @@ class LaneFollowNode(DTROS):
         self.last_error = 0
         self.last_time = rospy.get_time()
 
+        self.timer = 0
+
         # handling stopping at stopline
         self.prep_turn = False  # initiate the turning when this is set to true
         self.stop_timer_reset = 0  # 0 is can stop any time, non-zero means wait a period of time and then we look for stop lines
@@ -90,10 +92,17 @@ class LaneFollowNode(DTROS):
     def object_callback(self, msg):
         msg_json = json.loads(msg.data) or False
         if msg_json:
-            self.lock.acquire() ## do i keep this?
+            self.lock.acquire() 
             self.obj_class = msg_json["class"]
             self.obj_scores = msg_json["scores"]     
-            self.obj_boxes = msg_json["pred_boxes"]       
+            self.obj_boxes = msg_json["pred_boxes"]   
+            if 1 in self.obj_class:
+                for idx, val in enumerate(self.obj_class):
+                    width = self.obj_boxes[idx][2] - self.obj_boxes[idx][0]
+                    min_y = self.obj_boxes[idx][1]
+                    min_x = self.obj_boxes[idx][0]
+                    if 150<min_x<250 and 80<width:
+                        self.broken_duckiebot_detected = True
             self.lock.release()
 
     def general_callback(self, msg):
@@ -151,7 +160,7 @@ class LaneFollowNode(DTROS):
             self.lock.release()
             if broken_duckiebot_detected and stop_timer_reset == 0:
                 self.on_stopline(STOP_BECAUSE_BROKEN_DUCKIEBOT)
-
+                
             # recognize crosswalk by the apriltag detection
             self.lock.acquire()
             crosswalk_tag_detected = self.crosswalk_tag_detected
@@ -222,22 +231,29 @@ class LaneFollowNode(DTROS):
                     self.general_pub.publish(String('part3_start'))
                 
             elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
-                # wait for duckies
-                self.controller.stop(20)
+                # wait for duckies  
                 timer = 20
-                while 0 in self.obj_class or timer>0:
-                    timer -= 1
+                while timer > 0:
+                    timer -=1
+                    self.controller.stop(1)
+                    if 0 in self.obj_class:
+                        timer = 20
                 new_stateid = self.bot_state.advance_state()
             elif self.stop_cause == STOP_BECAUSE_BROKEN_DUCKIEBOT:
-                self.controller.stop(20)
-                # TODO: set self.offset to -220 for a period of e.g. 2 seconds
-
+                self.timer = 30
+                
             self.after_stopline()
 
         else:  # PID CONTROLLED LANE FOLLOWING
+            if self.timer>0:
+                self.offset = -220
+                self.timer -=1
+            if self.timer<=0:
+                self.offset = 220 
             if self.proportional is None:
                 self.twist.omega = 0
             else:
+
                 # P Term
                 P = -self.proportional * self.P
 
