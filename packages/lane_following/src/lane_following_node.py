@@ -219,15 +219,15 @@ class LaneFollowNode(DTROS):
                 self.reset_pid()
 
                 if new_stateid == state_machine.P3_ENTER:
-                    # placeholder
-                    self.general_pub.publish(String('part3_start'))  # TODO: start part 3 parking node
+                    self.general_pub.publish(String('part3_start'))
+                
             elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
+                # wait for duckies
                 self.controller.stop(20)
                 timer = 20
                 while 0 in self.obj_class or timer>0:
                     timer -= 1
                 new_stateid = self.bot_state.advance_state()
-                # TODO: wait for ducks to cross if any
             elif self.stop_cause == STOP_BECAUSE_BROKEN_DUCKIEBOT:
                 self.controller.stop(20)
                 # TODO: set self.offset to -220 for a period of e.g. 2 seconds
