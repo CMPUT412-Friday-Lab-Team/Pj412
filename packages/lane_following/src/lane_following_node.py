@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import rospy
 
 from duckietown.dtros import DTROS, NodeType
@@ -68,6 +69,7 @@ class LaneFollowNode(DTROS):
                                    queue_size=1)
         self.sub = rospy.Subscriber(f"/{self.veh}/camera_node/image/compressed", CompressedImage,
                                     self.callback, queue_size=1, buff_size="20MB")
+        self.obj_sub = rospy.Subscriber(f'/{HOST_NAME}/detectron2_duckiebot/detected_objects', String, self.object_callback)
         self.tag_distance_sub = rospy.Subscriber(f'/{HOST_NAME}/detected_tag_distance', String, self.tag_distance_callback)
         self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
         self.general_pub = rospy.Publisher('/general', String, queue_size=1)
@@ -83,6 +85,15 @@ class LaneFollowNode(DTROS):
         if tagid == 163 and distance < .4:
             self.lock.acquire()
             self.crosswalk_tag_detected = True
+            self.lock.release()
+
+    def object_callback(self, msg):
+        msg_json = json.loads(msg.data) or False
+        if msg_json:
+            self.lock.acquire() ## do i keep this?
+            self.obj_class = msg_json["class"]
+            self.obj_scores = msg_json["scores"]     
+            self.obj_boxes = msg_json["pred_boxes"]       
             self.lock.release()
 
     def general_callback(self, msg):
@@ -212,6 +223,9 @@ class LaneFollowNode(DTROS):
                     self.general_pub.publish(String('part3_start'))  # TODO: start part 3 parking node
             elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
                 self.controller.stop(20)
+                timer = 20
+                while 0 in self.obj_class or timer>0:
+                    timer -= 1
                 new_stateid = self.bot_state.advance_state()
                 # TODO: wait for ducks to cross if any
             elif self.stop_cause == STOP_BECAUSE_BROKEN_DUCKIEBOT:
