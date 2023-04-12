@@ -41,7 +41,7 @@ class LaneFollowNode(DTROS):
             self.offset = -220
         else:
             self.offset = 220
-        self.velocity = 0.36
+        self.velocity = 0.34
         self.speed = .6
         self.twist = Twist2DStamped(v=self.velocity, omega=0)
 
@@ -62,6 +62,9 @@ class LaneFollowNode(DTROS):
         self.stop_cause = None
         self.crosswalk_tag_detected = False
         self.broken_duckiebot_detected = False
+        self.obj_class = []
+        self.obj_scores = []
+        self.obj_boxes = []
 
         # Publishers & Subscribers
         self.bot_state = state_machine.BotState(1)  # pass in 1 as placeholder; in the end self.bot_state is not used in part 3
