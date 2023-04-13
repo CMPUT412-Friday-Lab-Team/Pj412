@@ -12,32 +12,40 @@ from duckietown.dtros import DTROS, TopicType, NodeType
 from duckietown_msgs.msg import AprilTagDetectionArray, Twist2DStamped, WheelEncoderStamped, WheelsCmdStamped
 from geometry_msgs.msg import Transform, Vector3, Quaternion
 
-MAX_DIST = 0.85
-
 HOST_NAME = os.environ["VEHICLE_NAME"]
+PARKING_1 = 207
+PARKING_2 = 226
+PARKING_3 = 228
+PARKING_4 = 75
+
 class Parking(DTROS):
 
     def __init__(self, node_name):
         super(Parking, self).__init__(node_name=node_name, node_type=NodeType.GENERIC)
+        
+        self.PARKING_SLOT = int(rospy.get_param("~parking_slot"))
+
 
         #Static Parameters
         self._radius = 0.0318
         self._robot_width = 0.1
 
         #Subscibers
-        self.sub = rospy.Subscriber(f'/{HOST_NAME}/apriltag_detector_node/detections', AprilTagDetectionArray,self.callback())
-        self.sub_left_wheel = rospy.Subscriber(f'/{HOST_NAME}/left_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback(),callback_args="left")
-        self.sub_right_wheel = rospy.Subscriber(f'/{HOST_NAME}/right_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback(),callback_args="right")
+        self.sub = rospy.Subscriber(f'/{HOST_NAME}/apriltag_detector_node/detections', AprilTagDetectionArray,self.callback)
+        self.sub_left_wheel = rospy.Subscriber(f'/{HOST_NAME}/left_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback,callback_args="left")
+        self.sub_right_wheel = rospy.Subscriber(f'/{HOST_NAME}/right_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback,callback_args="right")
 
         #Publishers
-        self.pub = rospy.Publisher(f"/{HOST_NAME}/car_cmd_switch_node/cmd", Twist2DStamped,queue_size=1)
-        self.genreal_shutdown = rospy.Publihseer('/general', String, queue_size = 1)
+        self.pub = rospy.Publisher(f"/{HOST_NAME}/wheels_driver_node/wheels_cmd", WheelsCmdStamped,queue_size=1)
+        self.pub_cmd = rospy.Publisher(f"/{HOST_NAME}/wheels_driver_node/wheels_cmd_executed", WheelsCmdStamped, queue_size=1)
+        self.genreal_shutdown = rospy.Publisher('/general', String, queue_size = 1)
+        
         #Encoder variables
         self.left_tick = None
         self.right_tick = None
 
-        self.delta_left = None
-        self.delta_right = None
+        self.delta_left = 0
+        self.delta_right = 0
 
         #Move and Turning variables
         self.left_distance = 0
@@ -45,17 +53,50 @@ class Parking(DTROS):
         self.angle = 0
 
         #Apriltag variables
-        self.rotation_matrix = None
-        self.translation_matrix = None
-        self.tag_id = None
+        self.tr_x = None
+        self.tr_z = None
+
+        self.tr_x_helper = None
+        self.tr_z_helper = None
+        
+        self.sign_x = None
+        self.sign_z = None
+        #Parking variables
+        self.parking_slot_id = None
+        self.helper_slot_id = None
+        self.target_found = False
+        self.helper_found = False
+
+    def assign_ids(self):
+        if self.PARKING_SLOT == 1:
+            self.parking_slot_id = PARKING_1
+            self.helper_slot_id = PARKING_3
+
+        elif self.PARKING_SLOT == 2:
+            self.parking_slot_id = PARKING_2
+            self.helper_slot_id = PARKING_4
+
+        elif self.PARKING_SLOT == 3:
+            self.parking_slot_id = PARKING_3
+            self.helper_slot_id = PARKING_1
+
+        elif self.PARKING_SLOT == 4:
+            self.parking_slot_id = PARKING_4
+            self.helper_slot_id = PARKING_1
 
     def callback(self,msg):
         for i in msg.detections:
-            print(f"Z: {i.transform.translation.z}")
-            if i.transform.translation.z < MAX_DIST:
-                self.translation_matrix = i.transform.translation
-                self.rotation_matrix = i.transform.rotation
-                self.tag_id = i.tag_id
+            # if i.tag_id == self.parking_slot_id:
+            #     self.tr_x = i.transform.translation.x
+            #     self.tr_z = i.transform.translation.z
+            #     self.target_found = True
+            if i.tag_id == self.helper_slot_id:
+                self.tr_x_helper = i.transform.translation.x
+                self.tr_z_helper = i.transform.translation.z
+                self.helper_found = True
+            elif i.tag_id == 227:
+                self.sign_x = i.transform.translation.x
+                self.sign_z = i.transform.translation.z
 
     def wheel_callback(self,msg,wheel):
         if wheel == "left":
@@ -73,37 +114,60 @@ class Parking(DTROS):
         if wheel == "left":
             self.left_tick = abs(msg.data)
             self.delta_left = delta
+            self.left_distance += abs(delta)
 
         else:
             self.right_tick = abs(msg.data)
             self.delta_right = delta
+            self.right_distance += abs(delta)
 
     def reset_variables(self):
         self.angle = 0
         self.left_distance = 0
         self.right_distance = 0
-        
-    def turn(self,direction,angle=(math.pi/2),v1=0.3,v2=0.3):
-        self.reset_variables()
-
-        if direction == "left":
-            v1 *= -1
-
-        else:
-            v2 *= -1
-        
+    
+    def stop(self):
         msg = WheelsCmdStamped()
         msg.header.stamp = rospy.Time.now()
-        msg.vel_left = v1
-        msg.vel_right = v2
+        msg.vel_left = 0
+        msg.vel_right = 0
+        self.pub.publish(msg)
+        self.pub_cmd.publish(msg)
+
+    def turn(self,direction,angle=(math.pi),v1=0.3,v2 = 0.3):
+        self.reset_variables()
+
+        msg = WheelsCmdStamped()
+        msg.header.stamp = rospy.Time.now()
+
+        if direction == "left":
+            msg.vel_left = -v1
+            msg.vel_right = v2
+
+        else:
+            msg.vel_left = v1
+            msg.vel_right = -v2
 
         while self.angle < angle:
             self.pub.publish(msg)
-            self.angle += (self.delta_right + self.delta_left)/(2*self._robot_width)
+            self.pub_cmd.publish(msg)
+            self.angle += (self.right_distance + self.left_distance)/(self._robot_width)
             rospy.sleep(0.1)
 
+        self.stop()
 
-    def move(self,distance,v1=0.4,v2=0.4):
+    def find_apriltag(self,is_target = True):
+        if is_target:
+            while not self.target_found:
+                self.turn("left",math.pi/4)
+                rospy.sleep(0.1)
+
+        else:
+            while not self.helper_found:
+                self.turn("left",math.pi/4)
+                rospy.sleep(0.1)
+
+    def move(self,distance,v1=0.3,v2=0.3):
         self.reset_variables()
 
         msg = WheelsCmdStamped()
@@ -115,42 +179,82 @@ class Parking(DTROS):
 
         while d_traveled < distance:
             self.pub.publish(msg)
-            self.left_distance += self.delta_left
-            self.right_distance += self.delta_right
+            self.pub_cmd.publish(msg)
             d_traveled = (self.left_distance + self.right_distance)/2
+            rospy.sleep(0.1)
+
+        self.stop()
+        rospy.sleep(1)
+
+    def take_initial_position(self):
+        while not self.sign_z or not self.parking_slot_id:
+            rospy.sleep(0.1)
+
+        if self.parking_slot_id == PARKING_1 or self.parking_slot_id == PARKING_3:
+            distance = 0.25
+        elif self.parking_slot_id == PARKING_2 or self.parking_slot_id == PARKING_4:
+            distance = 0.55
+
+        while self.sign_z > distance:
+            if self.sign_x < 0:
+                self.move(0.01,v1 = 0.3,v2 = 0.3 + abs(self.sign_x)*5)
+               
+            elif self.sign_x > 0:
+                self.move(0.01,v1= 0.3 + abs(self.sign_x)*5,v2=0.3)
+
+            print("Z:",self.sign_z)
+            print("Distance:",distance)
+            
+            rospy.sleep(0.1)
+
+        rospy.sleep(1)
 
     def take_position(self):
-        park_slot = int(input("Which parking slot?: "))
-        if park_slot == 1 or park_slot == 3:
-            self.move(0.5)
-            if park_slot == 1:
-                self.turn("left",(math.pi/4))
-            else:
-                self.turn("right",(math.pi/4))
+
+        self.reset_variables()
+        self.take_initial_position()
+        if self.PARKING_SLOT == 1 or self.PARKING_SLOT == 2:
+            self.turn("right",(math.pi/2))
         else:
-            self.move(0.25)
-            if park_slot == 2:
-                self.turn("left",math.pi/4)
+            self.turn("left",(math.pi/2))
+
+        rospy.sleep(1)
+
+    def allign(self):
+        self.reset_variables()
+
+        while not self.helper_found:
+            rospy.sleep(0.1)
+
+        while self.tr_z_helper < 1.9:
+            if self.tr_x_helper < 0:
+                self.move(0.01,v1 = -0.3 - abs(self.sign_x)*5,v2 = -0.3)
+
             else:
-                self.turn("right",math.pi/4)
+                self.move(0.01,v1 = -0.3, v2 = -0.3 - abs(self.sign_x)*5)
+            print("Z:",self.tr_z_helper)
+            print("X:",self.tr_x_helper)
+
+
 
     def shutdown(self):
         self.genreal_shutdown.publish("shutdown")
+        
         rospy.signal_shutdown("Shutting Down ...")
 
     def main(self):
+        self.assign_ids()
         self.take_position()
-
+        self.allign()
+        
+        self.shutdown()
         """
         Main idea is:
                 taking position -> calculate distance using translation matrix -> Do 180 turn -> Use Rotation Matrix to Allign -> Go Backwards
         
         
         """
-        pass
-
 if __name__ == '__main__':
     parking_node = Parking('parking_node')
-    rospy.spin()
-
-
+    while not rospy.is_shutdown():
+        parking_node.main()
