@@ -81,6 +81,7 @@ class DeadReckoning:
 
         self.total_dist = 0
         self.wheel_integration = wheel_int.WheelPositionIntegration(33, 0, 0, 0)
+        self.stop_flag = False
 
         # Setup publishers
         self.wheel_pub = rospy.Publisher(f'/{HOST_NAME}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=10)
@@ -134,7 +135,8 @@ class DeadReckoning:
         msg = WheelsCmdStamped()
         msg.vel_left = left_speed
         msg.vel_right = right_speed
-        self.wheel_pub.publish(msg)
+        if not self.stop_flag:
+            self.wheel_pub.publish(msg)
 
     def stop(self, stop_time=16):
         """

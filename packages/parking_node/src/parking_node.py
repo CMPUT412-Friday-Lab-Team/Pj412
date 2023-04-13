@@ -34,7 +34,7 @@ class Parking(DTROS):
 
         #Subscibers
         self.sub = rospy.Subscriber(f'/{HOST_NAME}/apriltag_detector_node/detections', AprilTagDetectionArray,self.callback)
-        self.general_sub = rospy.Subscriber(f'/general', String, self.general_callback)
+        self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
         self.sub_left_wheel = rospy.Subscriber(f'/{HOST_NAME}/left_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback,callback_args="left")
         self.sub_right_wheel = rospy.Subscriber(f'/{HOST_NAME}/right_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback,callback_args="right")
 
@@ -73,6 +73,7 @@ class Parking(DTROS):
         self.rigjt_side_multiplier = None
 
     def general_callback(self, msg):
+        print(msg.data)
         if msg.data == "part3_start":
             self.start_flag = True
 
@@ -106,6 +107,7 @@ class Parking(DTROS):
             elif i.tag_id == 227:
                 self.sign_x = i.transform.translation.x
                 self.sign_z = i.transform.translation.z
+                self.start_flag = True
 
     def wheel_callback(self,msg,wheel):
         if wheel == "left":
@@ -257,8 +259,10 @@ class Parking(DTROS):
         rospy.signal_shutdown("Shutting Down ...")
 
     def main(self):
+        print('parking node waiting to start')
         while not self.start_flag:
-            rospy.sleep(1)
+            rospy.sleep(0.5)
+        print('parking node starts')
 
         self.assign_ids()
         self.take_position()

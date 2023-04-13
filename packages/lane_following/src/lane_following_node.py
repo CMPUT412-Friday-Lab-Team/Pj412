@@ -44,6 +44,7 @@ class LaneFollowNode(DTROS):
         self.velocity = 0.34
         self.speed = .6
         self.twist = Twist2DStamped(v=self.velocity, omega=0)
+        self.stop_flag = False
 
         self.P = 0.049
         self.D = -0.004
@@ -77,7 +78,7 @@ class LaneFollowNode(DTROS):
         self.obj_sub = rospy.Subscriber(f'/{HOST_NAME}/detectron2_duckiebot/detected_objects', String, self.object_callback)
         self.tag_distance_sub = rospy.Subscriber(f'/{HOST_NAME}/detected_tag_distance', String, self.tag_distance_callback)
         self.general_sub = rospy.Subscriber('/general', String, self.general_callback)
-        self.general_pub = rospy.Publisher('/general', String, queue_size=1)
+        self.general_pub = rospy.Publisher('/general', String, queue_size=3)
 
         self.vel_pub = rospy.Publisher(f"/{self.veh}/car_cmd_switch_node/cmd",
                                        Twist2DStamped,
@@ -110,8 +111,8 @@ class LaneFollowNode(DTROS):
     def general_callback(self, msg):
         if msg.data == 'shutdown':
             rospy.signal_shutdown('received shutdown message')
-        elif msg.data == 'part3_start':
-            rospy.signal_shutdown('lane following node shutting down because first two parts completed')
+        # elif msg.data == 'part3_start':
+        #     rospy.signal_shutdown('lane following node shutting down because first two parts completed')
 
     def reset_pid(self):
         self.proportional = None
@@ -226,6 +227,8 @@ class LaneFollowNode(DTROS):
 
                 if new_stateid == state_machine.P3_ENTER:
                     self.general_pub.publish(String('part3_start'))
+                    self.stop_flag = True
+                    self.controller.stop_flag = True
                 else:
                     self.controller.set_turn_flag(True)
                     self.controller.driveForTime(.6, .6, 6)
@@ -238,7 +241,7 @@ class LaneFollowNode(DTROS):
                     self.controller.set_turn_flag(False)
                     self.reset_pid()
                 if new_stateid == state_machine.P2_CROSSWALK_0:
-                    self.velocity = 0.25
+                    self.velocity = 0.22
                     
             elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
                 # wait for duckies  
@@ -289,7 +292,8 @@ class LaneFollowNode(DTROS):
                 if DEBUG:
                     self.loginfo(self.proportional, P, D, self.twist.omega, self.twist.v)
 
-            self.vel_pub.publish(self.twist)
+            if not self.stop_flag:
+                self.vel_pub.publish(self.twist)
 
     def red_stopline_processing(self, im):
         hsv = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)

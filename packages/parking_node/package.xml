@@ -1,5 +1,5 @@
 <package>
-  <name>apriltag_node</name>
+  <name>parking_node</name>
   <version>0.1.0</version>
   <description>
   This package is used to do part3 for the Final Project .
