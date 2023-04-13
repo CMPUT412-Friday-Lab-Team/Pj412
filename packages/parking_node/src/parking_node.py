@@ -66,6 +66,8 @@ class Parking(DTROS):
         self.helper_slot_id = None
         self.target_found = False
         self.helper_found = False
+        self.left_side_multiplier = None
+        self.rigjt_side_multiplier = None
 
     def assign_ids(self):
         if self.PARKING_SLOT == 1:
@@ -134,7 +136,7 @@ class Parking(DTROS):
         self.pub.publish(msg)
         self.pub_cmd.publish(msg)
 
-    def turn(self,direction,angle=(math.pi),v1=0.3,v2 = 0.3):
+    def turn(self,direction,angle=(math.pi),v1=0.5,v2 = 0.5):
         self.reset_variables()
 
         msg = WheelsCmdStamped()
@@ -191,7 +193,7 @@ class Parking(DTROS):
             rospy.sleep(0.1)
 
         if self.parking_slot_id == PARKING_1 or self.parking_slot_id == PARKING_3:
-            distance = 0.25
+            distance = 0.2
         elif self.parking_slot_id == PARKING_2 or self.parking_slot_id == PARKING_4:
             distance = 0.55
 
@@ -214,9 +216,14 @@ class Parking(DTROS):
         self.reset_variables()
         self.take_initial_position()
         if self.PARKING_SLOT == 1 or self.PARKING_SLOT == 2:
-            self.turn("right",(math.pi/2))
+            self.turn("right",(math.pi/2) + 0.2)
+            self.left_side_multiplier = 3
+            self.rigjt_side_multiplier = 5
         else:
-            self.turn("left",(math.pi/2))
+            self.turn("left",(math.pi/2) + 0.2)
+            self.left_side_multiplier = 5
+            self.rigjt_side_multiplier = 3
+
 
         rospy.sleep(1)
 
@@ -228,10 +235,10 @@ class Parking(DTROS):
 
         while self.tr_z_helper < 1.9:
             if self.tr_x_helper < 0:
-                self.move(0.01,v1 = -0.3 - abs(self.sign_x)*5,v2 = -0.3)
+                self.move(0.01,v1 = -0.3 - abs(self.sign_x)*self.left_side_multiplier,v2 = -0.3)
 
             else:
-                self.move(0.01,v1 = -0.3, v2 = -0.3 - abs(self.sign_x)*5)
+                self.move(0.01,v1 = -0.3, v2 = -0.3 - abs(self.sign_x)*self.rigjt_side_multiplier)
             print("Z:",self.tr_z_helper)
             print("X:",self.tr_x_helper)
 
