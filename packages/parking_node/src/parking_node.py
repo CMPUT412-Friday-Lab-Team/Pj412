@@ -30,8 +30,11 @@ class Parking(DTROS):
         self._radius = 0.0318
         self._robot_width = 0.1
 
+        self.start_flag = False
+
         #Subscibers
         self.sub = rospy.Subscriber(f'/{HOST_NAME}/apriltag_detector_node/detections', AprilTagDetectionArray,self.callback)
+        self.general_sub = rospy.Subscriber(f'/general', String, self.general_callback)
         self.sub_left_wheel = rospy.Subscriber(f'/{HOST_NAME}/left_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback,callback_args="left")
         self.sub_right_wheel = rospy.Subscriber(f'/{HOST_NAME}/right_wheel_encoder_node/tick',WheelEncoderStamped,self.wheel_callback,callback_args="right")
 
@@ -66,6 +69,10 @@ class Parking(DTROS):
         self.helper_slot_id = None
         self.target_found = False
         self.helper_found = False
+
+    def general_callback(self, msg):
+        if msg.data == "part3_start":
+            self.start_flag = True
 
     def assign_ids(self):
         if self.PARKING_SLOT == 1:
@@ -243,6 +250,9 @@ class Parking(DTROS):
         rospy.signal_shutdown("Shutting Down ...")
 
     def main(self):
+        while not self.start_flag:
+            rospy.sleep(1)
+
         self.assign_ids()
         self.take_position()
         self.allign()
