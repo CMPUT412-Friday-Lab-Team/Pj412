@@ -75,7 +75,7 @@ class MLNode(DTROS):
                 continue
 
             # broadcast tag id
-            print(f'detected id: {id}')
+            # print(f'detected id: {id}')
             self.tag_pub.publish(Int32(id))
     
     def callback(self, msg):

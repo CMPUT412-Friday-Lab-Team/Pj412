@@ -20,7 +20,7 @@ HOST_NAME = os.environ["VEHICLE_NAME"]
 ROAD_MASK = [(20, 60, 0), (50, 255, 255)]
 DEBUG = False
 ENGLISH = False
-STOP_TIMER_RESET_TIME = 60
+STOP_TIMER_RESET_TIME = 90
 
 STOP_BECAUSE_RED_STOPLINE = 1
 STOP_BECAUSE_BROKEN_DUCKIEBOT = 2
@@ -87,7 +87,7 @@ class LaneFollowNode(DTROS):
         words = msg.data.split()
         tagid = int(words[0])
         distance = float(words[1])
-        if tagid == 163 and distance < .4:
+        if tagid == 163 and distance < .5:
             self.lock.acquire()
             self.crosswalk_tag_detected = True
             self.lock.release()
@@ -99,12 +99,11 @@ class LaneFollowNode(DTROS):
             self.obj_class = msg_json["class"]
             self.obj_scores = msg_json["scores"]     
             self.obj_boxes = msg_json["pred_boxes"]   
-            if 1 in self.obj_class:
-                for idx, val in enumerate(self.obj_class):
-                    width = self.obj_boxes[idx][2] - self.obj_boxes[idx][0]
-                    min_y = self.obj_boxes[idx][1]
-                    min_x = self.obj_boxes[idx][0]
-                    if 150<min_x<250 and 80<width:
+            for idx, val in enumerate(self.obj_class):
+                if val == 1 and self.obj_scores[idx] > 0.9:
+                    max_y = self.obj_boxes[idx][3]
+                    if max_y > 200 and (self.obj_boxes[idx][0] <= 320 <= self.obj_boxes[idx][2]):
+                        print('setting broken detected to true')
                         self.broken_duckiebot_detected = True
             self.lock.release()
 
@@ -142,6 +141,8 @@ class LaneFollowNode(DTROS):
         # update stop timer/timer reset and skip the callback if the vehicle is stopped
         self.lock.acquire()
         stop_timer_reset = self.stop_timer_reset
+        # if self.stop_timer_reset > 0:
+        #     print(self.stop_timer_reset)
         self.stop_timer_reset = max(0, stop_timer_reset - 1)
         self.lock.release()
         if not self.bot_state.get_lane_following_flag():
@@ -151,16 +152,18 @@ class LaneFollowNode(DTROS):
         img = self.jpeg.decode(msg.data)
         flags = self.bot_state.get_flags()
 
+        # print(self.bot_state.stateid, flags['is_expecting_crosswalk'])
         if flags['is_expecting_red_stopline']:
             if stop_timer_reset == 0:
                 self.red_stopline_processing(img)
         elif flags['is_expecting_crosswalk']:
             # two cases: crosswalk or broken duckiebot
-            # test for brokwn duckiebot first
+            # test for broken duckiebot first
             self.lock.acquire()
             broken_duckiebot_detected = self.broken_duckiebot_detected
             self.broken_duckiebot_detected = False
             self.lock.release()
+            # print(broken_duckiebot_detected, stop_timer_reset)
             if broken_duckiebot_detected and stop_timer_reset == 0:
                 self.on_stopline(STOP_BECAUSE_BROKEN_DUCKIEBOT)
                 
@@ -196,7 +199,9 @@ class LaneFollowNode(DTROS):
             try:
                 cx = int(M['m10'] / M['m00'])
                 cy = int(M['m01'] / M['m00'])
-                self.proportional = cx - int(crop_width / 2) + self.offset
+                threshold = 200
+
+                self.proportional = min(threshold, max(-threshold, cx - int(crop_width / 2) + self.offset))
                 if DEBUG:
                     cv2.drawContours(crop, contours, max_idx, (0, 255, 0), 3)
                     cv2.circle(crop, (cx, cy), 7, (0, 0, 255), -1)
@@ -225,13 +230,15 @@ class LaneFollowNode(DTROS):
                     self.controller.set_turn_flag(True)
                     self.controller.driveForTime(.6, .6, 6)
                     if turn_idx == 0:
-                        self.controller.driveForTime(.58 * self.speed, 1.42 * self.speed, 40)
+                        self.controller.driveForTime(.65 * self.speed, 1.35 * self.speed, 60)
                     elif turn_idx == 1:
-                        self.controller.driveForTime(.9 * self.speed, 1.1 * self.speed, 78)
+                        self.controller.driveForTime(.96 * self.speed, 1.04 * self.speed, 84)
                     elif turn_idx == 2:
                         self.controller.driveForTime(1.47 * self.speed, .53 * self.speed, 15)
                     self.controller.set_turn_flag(False)
                     self.reset_pid()
+                if new_stateid == state_machine.P2_CROSSWALK_0:
+                    self.velocity = 0.25
                     
             elif self.stop_cause == STOP_BECAUSE_CROSSWALK:
                 # wait for duckies  
@@ -239,11 +246,22 @@ class LaneFollowNode(DTROS):
                 while timer > 0:
                     timer -=1
                     self.controller.stop(1)
+                    self.lock.acquire()
                     if 0 in self.obj_class:
                         timer = 20
+                    self.lock.release()
+                    self.stop_timer_reset = STOP_TIMER_RESET_TIME
                 new_stateid = self.bot_state.advance_state()
+                # if new_stateid == state_machine.P2_CROSSWALK_2:
+                #     self.velocity = 0.34
             elif self.stop_cause == STOP_BECAUSE_BROKEN_DUCKIEBOT:
-                self.timer = 30
+                self.stop_timer_reset = math.inf
+                self.controller.stop(20)
+                self.controller.driveForTime(-.96 * self.speed, -1.04 * self.speed, 30)
+                self.controller.stop(20)
+                self.controller.driveForTime(.96 * self.speed, 1.04 * self.speed, 15)
+                self.stop_timer_reset = int(32 / 8 * 30)
+                self.timer = 32
                 
             self.after_stopline()
 

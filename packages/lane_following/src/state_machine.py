@@ -184,6 +184,7 @@ class BotState:
         self.is_expecting_red_stopline = self.lane_follow and (new_stateid < P2_CROSSWALK_0 or new_stateid > P2_CROSSWALK_1)
         
         self.is_expecting_crosswalk = self.lane_follow and (not self.is_expecting_red_stopline)
+        print(self.lane_follow, self.is_expecting_crosswalk)
 
 
     def advance_state(self):
